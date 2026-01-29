@@ -1,31 +1,3 @@
-# =========================================================
-# AUTO INSTALL REQUIRED LIBRARIES
-# =========================================================
-import subprocess
-import sys
-
-def install(pkg):
-    subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
-
-required_libs = [
-    "streamlit",
-    "torch",
-    "diffusers",
-    "transformers",
-    "accelerate",
-    "safetensors",
-    "pillow"
-]
-
-for lib in required_libs:
-    try:
-        __import__(lib)
-    except ImportError:
-        install(lib)
-
-# =========================================================
-# IMPORTS
-# =========================================================
 import streamlit as st
 import torch
 from diffusers import StableDiffusionPipeline
@@ -46,7 +18,7 @@ st.title("🎨 AI Image Generator")
 st.write("Fast, Professional & Interactive Diffusion Image Generator")
 
 # =========================================================
-# SESSION STATE (HISTORY & GALLERY)
+# SESSION STATE
 # =========================================================
 if "history" not in st.session_state:
     st.session_state.history = []
@@ -75,9 +47,9 @@ def load_model():
 pipe = load_model()
 
 # =========================================================
-# SIDEBAR SETTINGS
+# SIDEBAR
 # =========================================================
-st.sidebar.header("⚙️ Generation Settings")
+st.sidebar.header("⚙️ Settings")
 
 steps = st.sidebar.slider("Inference Steps", 20, 50, 30)
 guidance = st.sidebar.slider("Guidance Scale", 5.0, 12.0, 7.5)
@@ -91,48 +63,36 @@ style = st.sidebar.selectbox(
 STYLE_MAP = {
     "Photorealistic": "ultra realistic, DSLR photography, sharp focus, natural lighting",
     "Cinematic": "cinematic lighting, dramatic shadows, movie still, volumetric light",
-    "Anime": "anime style, vibrant colors, clean lines, studio ghibli inspired",
-    "Fantasy Art": "epic fantasy artwork, magical atmosphere, concept art, artstation",
-    "Digital Painting": "digital painting, smooth brush strokes, high detail, artistic"
+    "Anime": "anime style, vibrant colors, clean lines",
+    "Fantasy Art": "epic fantasy artwork, magical atmosphere, concept art",
+    "Digital Painting": "digital painting, smooth brush strokes, artistic"
 }
 
 # =========================================================
-# MAIN INPUT AREA
+# INPUTS
 # =========================================================
-prompt = st.text_area(
-    "📝 Enter your prompt",
-    placeholder="A futuristic city at sunset"
-)
-
+prompt = st.text_area("📝 Enter prompt")
 negative_prompt = st.text_input(
     "🚫 Negative Prompt",
-    value="blurry, low quality, distorted, extra fingers, bad anatomy"
+    "blurry, low quality, distorted, bad anatomy"
 )
-
-enhance = st.checkbox("✨ Professional Prompt Enhancement", value=True)
+enhance = st.checkbox("✨ Professional Enhancement", value=True)
 
 # =========================================================
-# GENERATE IMAGE
+# GENERATE
 # =========================================================
 if st.button("🚀 Generate Image"):
 
-    if prompt.strip() == "":
+    if not prompt.strip():
         st.warning("Please enter a prompt")
     else:
-        with st.spinner("Generating image... ⏳"):
+        with st.spinner("Generating image..."):
             start = time.time()
 
-            style_prompt = STYLE_MAP[style]
-
-            if enhance:
-                final_prompt = f"""
-                {prompt},
-                {style_prompt},
-                8k resolution, highly detailed,
-                professional quality, realistic textures
-                """
-            else:
-                final_prompt = prompt
+            final_prompt = (
+                f"{prompt}, {STYLE_MAP[style]}, highly detailed, professional quality"
+                if enhance else prompt
+            )
 
             generator = torch.manual_seed(seed)
 
@@ -144,64 +104,34 @@ if st.button("🚀 Generate Image"):
                 generator=generator
             ).images[0]
 
-            end = time.time()
-
-        # SAVE HISTORY
         st.session_state.history.append({
             "prompt": prompt,
             "style": style,
             "seed": seed
         })
-
-        # SAVE GALLERY
         st.session_state.gallery.append(image)
 
-        st.image(image, caption="Generated Image", use_column_width=True)
-        st.success(f"Generated in {round(end - start, 2)} seconds")
+        st.image(image, use_column_width=True)
+        st.success(f"Done in {round(time.time()-start, 2)}s")
 
-        # DOWNLOAD
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        buffer.seek(0)
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        buf.seek(0)
 
-        st.download_button(
-            "📥 Download Image",
-            buffer,
-            file_name="generated_image.png",
-            mime="image/png"
-        )
+        st.download_button("📥 Download", buf, "image.png", "image/png")
 
 # =========================================================
-# PROMPT HISTORY
+# HISTORY
 # =========================================================
 st.markdown("## 🧠 Prompt History")
-
-if len(st.session_state.history) == 0:
-    st.info("No prompts yet")
-else:
-    for i, item in enumerate(reversed(st.session_state.history), 1):
-        st.markdown(
-            f"**{i}.** `{item['prompt']}`  \n"
-            f"Style: *{item['style']}* | Seed: `{item['seed']}`"
-        )
+for h in reversed(st.session_state.history):
+    st.markdown(f"- **{h['prompt']}** | {h['style']} | Seed {h['seed']}")
 
 # =========================================================
-# IMAGE GALLERY
+# GALLERY
 # =========================================================
-st.markdown("## 🖼️ Image Gallery")
+st.markdown("## 🖼️ Gallery")
+cols = st.columns(3)
+for i, img in enumerate(reversed(st.session_state.gallery)):
+    cols[i % 3].image(img, use_column_width=True)
 
-if len(st.session_state.gallery) == 0:
-    st.info("No images generated yet")
-else:
-    cols = st.columns(3)
-    for idx, img in enumerate(reversed(st.session_state.gallery)):
-        with cols[idx % 3]:
-            st.image(img, use_column_width=True)
-
-# =========================================================
-# FOOTER
-# =========================================================
-st.markdown("---")
-st.caption(
-    "Built with ❤️ using Stable Diffusion • Streamlit • Hugging Face Diffusers"
-)
