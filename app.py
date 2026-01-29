@@ -5,9 +5,9 @@ from PIL import Image
 import io
 import time
 
-# =========================================================
+# -------------------------------------------------
 # PAGE CONFIG
-# =========================================================
+# -------------------------------------------------
 st.set_page_config(
     page_title="AI Image Generator",
     page_icon="🎨",
@@ -15,123 +15,162 @@ st.set_page_config(
 )
 
 st.title("🎨 AI Image Generator")
-st.write("Fast, Professional & Interactive Diffusion Image Generator")
+st.caption("Stable Diffusion based Image Generation with Prompt History & Gallery")
 
-# =========================================================
-# SESSION STATE
-# =========================================================
+# -------------------------------------------------
+# SESSION STATE INITIALIZATION
+# -------------------------------------------------
 if "history" not in st.session_state:
-    st.session_state.history = []
+    st.session_state["history"] = []
 
 if "gallery" not in st.session_state:
-    st.session_state.gallery = []
+    st.session_state["gallery"] = []
 
-# =========================================================
-# DEVICE
-# =========================================================
-device = "cuda" if torch.cuda.is_available() else "cpu"
-st.sidebar.success(f"Device: {device.upper()}")
+# -------------------------------------------------
+# DEVICE SETUP
+# -------------------------------------------------
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+st.sidebar.success(f"Device: {DEVICE.upper()}")
 
-# =========================================================
-# LOAD MODEL
-# =========================================================
-@st.cache_resource
-def load_model():
+# -------------------------------------------------
+# LOAD MODEL (SAFE CACHING)
+# -------------------------------------------------
+@st.cache_resource(show_spinner=False)
+def load_sd_model():
     pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
-        torch_dtype=torch.float16 if device == "cuda" else torch.float32
+        torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32
     )
-    pipe.to(device)
+    pipe = pipe.to(DEVICE)
+    pipe.enable_attention_slicing()
     return pipe
 
-pipe = load_model()
+pipe = load_sd_model()
 
-# =========================================================
-# SIDEBAR
-# =========================================================
-st.sidebar.header("⚙️ Settings")
+# -------------------------------------------------
+# SIDEBAR SETTINGS
+# -------------------------------------------------
+st.sidebar.header("⚙️ Generation Settings")
 
 steps = st.sidebar.slider("Inference Steps", 20, 50, 30)
 guidance = st.sidebar.slider("Guidance Scale", 5.0, 12.0, 7.5)
 seed = st.sidebar.number_input("Seed", value=42, step=1)
 
 style = st.sidebar.selectbox(
-    "🎭 Style",
+    "Image Style",
     ["Photorealistic", "Cinematic", "Anime", "Fantasy Art", "Digital Painting"]
 )
 
-STYLE_MAP = {
-    "Photorealistic": "ultra realistic, DSLR photography, sharp focus, natural lighting",
+STYLE_PROMPTS = {
+    "Photorealistic": "ultra realistic, DSLR photography, natural lighting, sharp focus",
     "Cinematic": "cinematic lighting, dramatic shadows, movie still, volumetric light",
-    "Anime": "anime style, vibrant colors, clean lines",
+    "Anime": "anime style, clean lines, vibrant colors, high detail",
     "Fantasy Art": "epic fantasy artwork, magical atmosphere, concept art",
-    "Digital Painting": "digital painting, smooth brush strokes, artistic"
+    "Digital Painting": "digital painting, smooth brush strokes, artistic style"
 }
 
-# =========================================================
-# INPUTS
-# =========================================================
-prompt = st.text_area("📝 Enter prompt")
+# -------------------------------------------------
+# PROMPT INPUTS
+# -------------------------------------------------
+prompt = st.text_area(
+    "📝 Prompt",
+    placeholder="A futuristic city at sunset"
+)
+
 negative_prompt = st.text_input(
     "🚫 Negative Prompt",
-    "blurry, low quality, distorted, bad anatomy"
+    value="blurry, low quality, distorted, bad anatomy, extra fingers"
 )
-enhance = st.checkbox("✨ Professional Enhancement", value=True)
 
-# =========================================================
-# GENERATE
-# =========================================================
-if st.button("🚀 Generate Image"):
+enhance_prompt = st.checkbox("✨ Enhance prompt (Professional)", value=True)
 
-    if not prompt.strip():
-        st.warning("Please enter a prompt")
+# -------------------------------------------------
+# IMAGE GENERATION
+# -------------------------------------------------
+if st.button("🚀 Generate Image", use_container_width=True):
+
+    if prompt.strip() == "":
+        st.warning("Please enter a prompt.")
     else:
         with st.spinner("Generating image..."):
-            start = time.time()
+            start_time = time.time()
 
-            final_prompt = (
-                f"{prompt}, {STYLE_MAP[style]}, highly detailed, professional quality"
-                if enhance else prompt
-            )
+            if enhance_prompt:
+                final_prompt = (
+                    f"{prompt}, {STYLE_PROMPTS[style]}, "
+                    "highly detailed, professional quality, 8k"
+                )
+            else:
+                final_prompt = prompt
 
-            generator = torch.manual_seed(seed)
+            generator = torch.Generator(device=DEVICE).manual_seed(int(seed))
 
             image = pipe(
-                final_prompt,
+                prompt=final_prompt,
                 negative_prompt=negative_prompt,
-                num_inference_steps=steps,
-                guidance_scale=guidance,
+                num_inference_steps=int(steps),
+                guidance_scale=float(guidance),
                 generator=generator
             ).images[0]
 
+            duration = time.time() - start_time
+
+        # SAVE HISTORY
         st.session_state.history.append({
             "prompt": prompt,
             "style": style,
             "seed": seed
         })
+
+        # SAVE IMAGE TO GALLERY
         st.session_state.gallery.append(image)
 
-        st.image(image, use_column_width=True)
-        st.success(f"Done in {round(time.time()-start, 2)}s")
+        # DISPLAY IMAGE
+        st.image(image, caption=f"Generated in {duration:.2f} seconds", use_column_width=True)
 
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        buf.seek(0)
+        # DOWNLOAD BUTTON
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        buffer.seek(0)
 
-        st.download_button("📥 Download", buf, "image.png", "image/png")
+        st.download_button(
+            "📥 Download Image",
+            data=buffer,
+            file_name="generated_image.png",
+            mime="image/png"
+        )
 
-# =========================================================
-# HISTORY
-# =========================================================
+# -------------------------------------------------
+# PROMPT HISTORY
+# -------------------------------------------------
 st.markdown("## 🧠 Prompt History")
-for h in reversed(st.session_state.history):
-    st.markdown(f"- **{h['prompt']}** | {h['style']} | Seed {h['seed']}")
 
-# =========================================================
-# GALLERY
-# =========================================================
-st.markdown("## 🖼️ Gallery")
-cols = st.columns(3)
-for i, img in enumerate(reversed(st.session_state.gallery)):
-    cols[i % 3].image(img, use_column_width=True)
+if len(st.session_state.history) == 0:
+    st.info("No prompts generated yet.")
+else:
+    for i, h in enumerate(reversed(st.session_state.history), 1):
+        st.markdown(
+            f"**{i}.** `{h['prompt']}`  \n"
+            f"Style: *{h['style']}* | Seed: `{h['seed']}`"
+        )
+
+# -------------------------------------------------
+# IMAGE GALLERY
+# -------------------------------------------------
+st.markdown("## 🖼️ Image Gallery")
+
+if len(st.session_state.gallery) == 0:
+    st.info("No images generated yet.")
+else:
+    cols = st.columns(3)
+    for idx, img in enumerate(reversed(st.session_state.gallery)):
+        with cols[idx % 3]:
+            st.image(img, use_column_width=True)
+
+# -------------------------------------------------
+# FOOTER
+# -------------------------------------------------
+st.markdown("---")
+st.caption("Built with Stable Diffusion • Streamlit • Hugging Face Diffusers")
+
 
